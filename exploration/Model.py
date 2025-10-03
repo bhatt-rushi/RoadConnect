@@ -503,19 +503,7 @@ m = Model(
 )
 
 m.run()
-#|%%--%%| <d1C9LohqaR|1eSca5QkZ3>
-
-m.graph.graph
-
-#|%%--%%| <1eSca5QkZ3|d2wTkw5d08>
-
-m.result_graphs
-
-#|%%--%%| <d2wTkw5d08|bnsmGNnBHn>
-
-m.run()
-
-#|%%--%%| <bnsmGNnBHn|mMfRqQPgyA>
+#|%%--%%| <d1C9LohqaR|mMfRqQPgyA>
 
 
 import graphviz
@@ -548,107 +536,176 @@ def visualize_node_graph(nodes_dict):
 
 # Usage example
 # Assuming 'nodes' is your dictionary of nodes
-visualize_node_graph(m.graph.graph)
+visualize_node_graph(m.result_graphs[0][1])
 
 
-#|%%--%%| <mMfRqQPgyA|i4VxWMoHSx>
+#|%%--%%| <mMfRqQPgyA|POqeFoW0bl>
 
 
+import plotly.graph_objs as go
 import networkx as nx
-import matplotlib.pyplot as plt
+import json
 
-def visualize_node_graph(nodes_dict):
-    # Create a new directed graph
+def truncate_hover_text(text, max_length=5000):
+    """
+    Truncate hover text if it's too long, with an ellipsis indicator
+    """
+    if len(text) <= max_length:
+        return text
+    
+    # Truncate and add ellipsis
+    return text[:max_length] + "... <i>(text truncated)</i>"
+
+def create_interactive_network(data_dict):
+    # Create NetworkX graph
     G = nx.DiGraph()
     
-    # Add nodes and edges to the graph
-    for index, node_data in nodes_dict.items():
-        # Add node with attributes
-        G.add_node(index, label=node_data)
-        nx.topological_sort(G)
+    for parent, node_info in data_dict.items():
+        # Add node with all its attributes
+        G.add_node(parent, **node_info)
+        
+        if 'Child_Node' in node_info and node_info['Child_Node']:
+            G.add_edge(parent, node_info['Child_Node'])
+    
+    # Compute layout
+    pos = nx.spring_layout(G, k=0.5, iterations=50)
+    
+    # Prepare node trace
+    node_x = []
+    node_y = []
+    node_hover_text = []
+    node_colors = []
+    
+    for node in G.nodes():
+        x, y = pos[node]
+        node_x.append(x)
+        node_y.append(y)
+        
+        # Create hover text with all node attributes
+        node_attrs = data_dict.get(node, {})
+        
+        # Build hover text with smart formatting
+        hover_lines = []
+        hover_lines.append(f"<b>{node}</b>")
+        
+        for key, value in node_attrs.items():
+            if key == 'Child_Node':
+                continue
+            
+            # Convert value to string and handle potential long values
+            str_value = str(value)
+            if len(str_value) > 100:
+                str_value = str_value[:100] + "..."
+            
+            hover_lines.append(f"{key}: {str_value}")
+        
+        # Join lines and truncate if necessary
+        hover_text = truncate_hover_text("<br>".join(hover_lines))
+        node_hover_text.append(hover_text)
+        
+        # Color nodes based on connectivity
+        node_colors.append(len(list(G.neighbors(node))))
+    
+    # Create node trace
+    node_trace = go.Scatter(
+        x=node_x, 
+        y=node_y,
+        mode='markers',  # Remove text labels
+        hoverinfo='text',
+        text=node_hover_text,
+        marker=dict(
+            showscale=True,
+            colorscale='Viridis',
+            size=15,
+            color=node_colors,
+            line_width=2
+        )
+    )
+    
+    # Prepare edge trace
+    edge_x = []
+    edge_y = []
+    for edge in G.edges():
+        start_x, start_y = pos[edge[0]]
+        end_x, end_y = pos[edge[1]]
+        edge_x.extend([start_x, end_x, None])
+        edge_y.extend([start_y, end_y, None])
+    
+    edge_trace = go.Scatter(
+        x=edge_x, 
+        y=edge_y,
+        line=dict(width=0.5, color='#888'),
+        hoverinfo='none',
+        mode='lines'
+    )
+    
+    # Create the figure
+    fig = go.Figure(data=[edge_trace, node_trace],
+                    layout=go.Layout(
+                        title='Interactive Network Graph',
+                        showlegend=False,
+                        hovermode='closest',
+                        margin=dict(b=20,l=5,r=5,t=40),
+                        annotations=[ 
+                            dict(
+                                text="Node size and color represent connectivity",
+                                showarrow=False,
+                                xref="paper", yref="paper",
+                                x=0.005, y=-0.002 
+                            )
+                        ],
+                        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)
+                    ))
+    
+    # Customize hover template for more control
+    fig.update_traces(
+        hovertemplate='%{text}<extra></extra>',  # Remove secondary hover box
+        hoverlabel=dict(
+            bgcolor='white',  # Background color of hover box
+            font_size=10,     # Font size of hover text
+            font_family='Arial'  # Font family
+        )
+    )
+    
+    return fig
 
-        # Add edge to child if exists
-        if node_data['Child_Node'] is not None:
-            G.add_edge(index, node_data['Child_Node'])
-
-    # Create figure and draw
-    plt.figure(figsize=(12, 8))
-
-    # Use spring layout for node positioning
-    pos = nx.spring_layout(G, k=0.9, iterations=50)
-
-    # Draw nodes
-    nx.draw_networkx_nodes(G, pos, node_color='lightblue', 
-                            node_size=3000, alpha=0.8)
-
-    # Draw edges
-    nx.draw_networkx_edges(G, pos, edge_color='gray', 
-                            arrows=True, arrowsize=20)
-
-    # Draw labels
-    node_labels = {node: G.nodes[node] for node in G.nodes()}
-    nx.draw_networkx_labels(G, pos, labels=node_labels, 
-                             font_size=8, font_weight="bold")
-
-    # Remove axis
-    plt.axis('off')
-
-    # Show the plot
-    plt.tight_layout()
-    plt.show()
+# Optional: Add interactive features
+def enhance_figure_interactivity(fig):
+    # Add zoom and pan capabilities
+    fig.update_layout(
+        dragmode='zoom',  # Allow zooming by dragging
+        hovermode='closest'
+    )
+    
+    # Optional: Add buttons for reset view
+    fig.update_layout(
+        updatemenus=[
+            dict(
+                type="buttons",
+                direction="left",
+                buttons=[
+                    dict(
+                        args=[{"visible": [True, True]},
+                              {"xaxis.autorange": True,
+                               "yaxis.autorange": True}],
+                        label="Reset Zoom",
+                        method="relayout"
+                    )
+                ],
+                pad={"r": 10, "t": 10},
+                showactive=False,
+                x=0.11,
+                xanchor="left",
+                y=1.1,
+                yanchor="top"
+            )
+        ]
+    )
+    
+    return fig
 
 # Usage
-visualize_node_graph(m.graph.graph)
-
-#|%%--%%| <i4VxWMoHSx|61WfY9YjYK>
-
-
-import matplotlib.pyplot as plt
-import base64
-from io import BytesIO
-
-def export_networkx_graph_to_html(nodes_dict, output_file='network_graph.html'):
-    # Create a new directed graph
-    G = m.graph.G
-
-    # Create figure and draw
-    plt.figure(figsize=(12, 8))
-
-    # Use spring layout for node positioning
-    pos = nx.spring_layout(G, k=0.9, iterations=50)
-
-    # Draw nodes
-    nx.draw_networkx_nodes(G, pos, node_color='lightblue', 
-                            node_size=3000, alpha=0.8)
-
-    # Draw edges
-    nx.draw_networkx_edges(G, pos, edge_color='gray', 
-                            arrows=True, arrowsize=20)
-
-    # Draw labels
-    node_labels = {node: str(node) for node in G.nodes()}
-    nx.draw_networkx_labels(G, pos, labels=node_labels, 
-                             font_size=8, font_weight="bold")
-
-    # Remove axis
-    plt.axis('off')
-
-    # Tight layout
-    plt.tight_layout()
-
-    # Save plot to a base64 encoded string
-    buffer = BytesIO()
-    plt.savefig('network_graph.pdf', bbox_inches='tight')
-    plt.close()
-
-# Usage
-export_networkx_graph_to_html(m.result_graphs[0])
-
-#|%%--%%| <61WfY9YjYK|POqeFoW0bl>
-
-
-
-#|%%--%%| <POqeFoW0bl|W2IEaMA0wo>
-
-
-
+interactive_fig = create_interactive_network(m.result_graphs[0][1])
+interactive_fig = enhance_figure_interactivity(interactive_fig)
+interactive_fig.show()
