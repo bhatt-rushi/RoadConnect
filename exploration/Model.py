@@ -69,6 +69,7 @@ class Model:
                     ) / 100) # Turn to percent
 
                     v['Pond_Efficiency'] = trapping_efficiency
+                    v['Sediment_Trapped'] = v['Sediment_Total'] * trapping_efficiency
                     v['Sediment_Total'] *= (1 - trapping_efficiency)
 
                     for key, value in v['All_Connected_Segments']['Sediment'].items():
@@ -463,6 +464,7 @@ class Data(Model):
             invalid_indexes =  [idx for idx, line in enumerate(self.gdf.geometry) if not line.is_simple]
             if invalid_indexes: raise ValueError(f"Self-intersecting lines at indexes: {invalid_indexes}")
 
+        # Never called, ignore this function
         def _is_downhill_path(self, path, point, elevation_src):
             start = shapely.geometry.Point(path.geometry.coords[0])
             end = shapely.geometry.Point(path.geometry.coords[-1])
@@ -482,13 +484,13 @@ class Data(Model):
                 self.md = src.meta
 
 
-roadpath = 'test_data/roads.shp'
-roadtypepath = 'config.json'
-drainpath = 'test_data/drains.shp'
-pondpath = 'test_data/ponds.shp'
-flowpathpath = 'test_data/flowpaths.shp'
-elevationpath = 'test_data/elevation.tif'
-configpath = 'config.json'
+roadpath = 'user_data/roads.shp'
+roadtypepath = 'config/config.json'
+drainpath = 'user_data/drains.shp'
+pondpath = 'user_data/ponds.shp'
+flowpathpath = 'user_data/flowpaths.shp'
+elevationpath = 'user_data/elevation.tif'
+configpath = 'config/config.json'
 
 m = Model(
     roadpath=roadpath,
