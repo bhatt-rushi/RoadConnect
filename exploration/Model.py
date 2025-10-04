@@ -62,6 +62,7 @@ class Model:
                 # Pond Traps Sediment
                 if v['Type'] == 'P' and v['Runoff_Total'] > 0:
 
+                    # TODO: Pond consumes runoff = pond volume
                     trapping_efficiency = float(np.clip(
                         -22 + ( (119 * ((v['Pond_Max_Capacity'] - v['Pond_Used_Capacity']) / v['Runoff_Total'])) / (0.012 + 1.02 * ((v['Pond_Max_Capacity'] - v['Pond_Used_Capacity']) / v['Runoff_Total']))),
                         0, # Min Eff
@@ -517,8 +518,13 @@ def visualize_node_graph(nodes_dict):
         # Create a node label with key information
         node_label = f"Index: {index}\n" \
                      f"Type: {node_data['Type']}\n" \
-                     f"Elevation: {node_data['Elevation']}\n" \
-                     f"Directly_CS: {node_data['Directly_Connected_Segments']}"
+                     f"Runoff Total: {node_data['Runoff_Total']}\n" \
+                     f"Runoff By Roadtype: {node_data['All_Connected_Segments']['Runoff']}\n" \
+                     f"Sediment Total: {node_data['Sediment_Total']}\n" \
+                     f"Sediment By Roadtype: {node_data['All_Connected_Segments']['Sediment']}"
+
+        if node_data['Type'] == 'P':
+            node_label = node_label + f"\nPond Efficiency: {node_data['Pond_Efficiency']}\nSediment Trapped: {node_data['Sediment_Trapped']}"
 
         # Use the string representation of the index as the node identifier
         node_id = str(index)
@@ -552,60 +558,60 @@ def truncate_hover_text(text, max_length=5000):
     """
     if len(text) <= max_length:
         return text
-    
+
     # Truncate and add ellipsis
     return text[:max_length] + "... <i>(text truncated)</i>"
 
 def create_interactive_network(data_dict):
     # Create NetworkX graph
     G = nx.DiGraph()
-    
+
     for parent, node_info in data_dict.items():
         # Add node with all its attributes
         G.add_node(parent, **node_info)
-        
+
         if 'Child_Node' in node_info and node_info['Child_Node']:
             G.add_edge(parent, node_info['Child_Node'])
-    
+
     # Compute layout
     pos = nx.spring_layout(G, k=0.5, iterations=50)
-    
+
     # Prepare node trace
     node_x = []
     node_y = []
     node_hover_text = []
     node_colors = []
-    
+
     for node in G.nodes():
         x, y = pos[node]
         node_x.append(x)
         node_y.append(y)
-        
+
         # Create hover text with all node attributes
         node_attrs = data_dict.get(node, {})
-        
+
         # Build hover text with smart formatting
         hover_lines = []
         hover_lines.append(f"<b>{node}</b>")
-        
+
         for key, value in node_attrs.items():
             if key == 'Child_Node':
                 continue
-            
+
             # Convert value to string and handle potential long values
             str_value = str(value)
             if len(str_value) > 100:
                 str_value = str_value[:100] + "..."
-            
+
             hover_lines.append(f"{key}: {str_value}")
-        
+
         # Join lines and truncate if necessary
         hover_text = truncate_hover_text("<br>".join(hover_lines))
         node_hover_text.append(hover_text)
-        
+
         # Color nodes based on connectivity
         node_colors.append(len(list(G.neighbors(node))))
-    
+
     # Create node trace
     node_trace = go.Scatter(
         x=node_x, 
@@ -621,7 +627,7 @@ def create_interactive_network(data_dict):
             line_width=2
         )
     )
-    
+
     # Prepare edge trace
     edge_x = []
     edge_y = []
@@ -630,7 +636,7 @@ def create_interactive_network(data_dict):
         end_x, end_y = pos[edge[1]]
         edge_x.extend([start_x, end_x, None])
         edge_y.extend([start_y, end_y, None])
-    
+
     edge_trace = go.Scatter(
         x=edge_x, 
         y=edge_y,
@@ -638,7 +644,7 @@ def create_interactive_network(data_dict):
         hoverinfo='none',
         mode='lines'
     )
-    
+
     # Create the figure
     fig = go.Figure(data=[edge_trace, node_trace],
                     layout=go.Layout(
@@ -657,7 +663,7 @@ def create_interactive_network(data_dict):
                         xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                         yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)
                     ))
-    
+
     # Customize hover template for more control
     fig.update_traces(
         hovertemplate='%{text}<extra></extra>',  # Remove secondary hover box
@@ -667,7 +673,7 @@ def create_interactive_network(data_dict):
             font_family='Arial'  # Font family
         )
     )
-    
+
     return fig
 
 # Optional: Add interactive features
@@ -677,7 +683,7 @@ def enhance_figure_interactivity(fig):
         dragmode='zoom',  # Allow zooming by dragging
         hovermode='closest'
     )
-    
+
     # Optional: Add buttons for reset view
     fig.update_layout(
         updatemenus=[
@@ -702,7 +708,7 @@ def enhance_figure_interactivity(fig):
             )
         ]
     )
-    
+
     return fig
 
 # Usage
