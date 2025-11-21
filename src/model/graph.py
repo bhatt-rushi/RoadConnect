@@ -212,6 +212,9 @@ class Graph:
             if not nx.is_directed_acyclic_graph(self.__G):
                 raise ValueError(f"Adding point {node.point} made the graph cycle.")
 
+    def to_networkx_graph(self) -> nx.DiGraph:
+        return self.__G
+
     def get_topological_order(self) -> List[shapely.geometry.point.Point]:
         return list(nx.topological_sort(self.__G))
 
