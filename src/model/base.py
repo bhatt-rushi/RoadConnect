@@ -16,7 +16,6 @@ class Model:
     def __post_init__(self) -> None:
         self.results : List[Tuple[float, nx.DiGraph]] = []
         self.run()
-        print(self.results)
 
     def load_config_values(self):
         # Load values from configuration file

@@ -1,7 +1,9 @@
 from model.base import Model
+from utils.serializer import serialize_rainfall_data
 
 def main():
-        Model()
+    m : Model = Model()
+    serialize_rainfall_data(m.results, "results.json")
 
 if __name__ == '__main__':
     main()
