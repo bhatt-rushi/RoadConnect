@@ -5,7 +5,6 @@ from model import graph
 import networkx as nx
 from model import data
 from tqdm import tqdm
-from copy import deepcopy
 
 class Model:
     def __init__(self) -> None:
@@ -28,14 +27,10 @@ class Model:
 
     def run(self) -> List[Tuple[float, nx.DiGraph]]:
         results = []
-        processing_order = self.base_graph.get_topological_order()
 
         for rainfall_event_total in tqdm(self.rainfall_events, total=len(self.rainfall_events)):
-            g = deepcopy(self.base_graph)
-            g.prepare_graph(rainfall_event_total)
-
-            for node in processing_order:
-                g.process_node(node)
-
+            g = self.base_graph.copy()
+            g.simulate_rainfall(rainfall_event_total)
+            g.print()
             results.append((rainfall_event_total, g.to_networkx_graph()))
         return results

@@ -4,6 +4,7 @@ from typing import Dict, List
 import shapely.geometry
 import networkx as nx
 import numpy as np
+from copy import deepcopy
 
 from utils import funcs, config
 
@@ -172,6 +173,9 @@ class Graph:
     def __init__(self) -> None:
         self.__G : nx.DiGraph = nx.DiGraph()
 
+    def copy(self) -> 'Graph':
+        return deepcopy(self)
+
     def print(self):
         for node, data in self.__G.nodes(data=True):
             print(f"Node {node}: {data.get('nodedata')}")
@@ -226,6 +230,13 @@ class Graph:
         self.rainfall_event_size = rainfall_event_size
 
         self.__G.clear_edges() # We're only going to add edges if runoff > cost
+
+    def simulate_rainfall(self, rainfall_event_size: float) -> None:
+        processing_order = self.get_topological_order()
+        self.prepare_graph(rainfall_event_size)
+
+        for node in processing_order:
+            self.process_node(node)
 
     def process_node(self, point: shapely.geometry.point.Point) -> None:
         nodedata = self.__G.nodes[point]['nodedata']
