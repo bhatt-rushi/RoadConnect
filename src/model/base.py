@@ -11,9 +11,12 @@ class Model:
         # TODO: Check that all CRS match
         self.load_config_values()
         self.generate_base_graph()
+        self.__post_init__()
 
+    def __post_init__(self) -> None:
+        self.results : List[Tuple[float, nx.DiGraph]] = []
         self.run()
-        pass
+        print(self.results)
 
     def load_config_values(self):
         # Load values from configuration file
@@ -25,12 +28,9 @@ class Model:
         self.base_graph.add_nodes(data.drains.get_nodes())
         self.base_graph.add_nodes(data.ponds.get_nodes())
 
-    def run(self) -> List[Tuple[float, nx.DiGraph]]:
-        results = []
-
+    def run(self):
+        # For each rainfall event, get a graph
         for rainfall_event_total in tqdm(self.rainfall_events, total=len(self.rainfall_events)):
             g = self.base_graph.copy()
             g.simulate_rainfall(rainfall_event_total)
-            g.print()
-            results.append((rainfall_event_total, g.to_networkx_graph()))
-        return results
+            self.results.append((rainfall_event_total, g.to_networkx_graph()))
