@@ -171,7 +171,11 @@ class GraphNode:
 
 class Graph:
     def __init__(self) -> None:
+        from model import data
+        print("Generating Base Graph...")
         self.__G : nx.DiGraph = nx.DiGraph()
+        self.add_nodes(data.ponds.get_nodes())
+        self.add_nodes(data.drains.get_nodes())
 
     def copy(self) -> 'Graph':
         return deepcopy(self)
