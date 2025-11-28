@@ -1,7 +1,7 @@
 # /src/model/base.py
 from typing import List, Tuple
 from utils import config
-from model import graph
+from model import graph, visualization
 import networkx as nx
 from tqdm import tqdm
 
@@ -26,4 +26,10 @@ class Model:
         for rainfall_event_total in tqdm(self.rainfall_events, total=len(self.rainfall_events)):
             g = self.base_graph.copy()
             g.simulate_rainfall(rainfall_event_total)
-            self.results.append((rainfall_event_total, g.to_networkx_graph()))
+
+            nx_graph = g.to_networkx_graph()
+            for point in nx_graph.nodes:
+                nodedata = nx_graph.nodes[point]['nodedata']
+                nodedata.visualization = visualization.visualization_information(graph=nx_graph, node=nodedata)
+
+            self.results.append((rainfall_event_total, nx_graph))

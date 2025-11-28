@@ -40,7 +40,7 @@ def get_nodes() -> List[GraphNode]:
             used_capacity=used_capacity
         )
 
-        node.child, node.distance_to_child, node.cost_to_connect_child = flowpaths.trace_drainage_endpoint(point)
+        node.child, node.distance_to_child, node.cost_to_connect_child, node.index_of_flowpath_to_child = flowpaths.trace_drainage_endpoint(point)
 
         nodes.append(node)
 

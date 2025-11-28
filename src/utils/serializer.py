@@ -261,11 +261,6 @@ def _serialize_node(node: Any, geo: GeometryProcessor) -> Dict[str, Any]:
 
     road_data = {}
     if node.road:
-        # Explicitly handle Geometry
-        road_data["wkt"] = geo.indices_to_ewkt_map(getattr(node.road, "indices", {}))
-        road_data["local_wkt"] = geo.indices_to_ewkt_map(getattr(node.road, "_local_indices", {}))
-        road_data["ancestor_wkt"] = geo.indices_to_ewkt_map(getattr(node.road, "_ancestor_indices", {}))
-
         stats = AttributeExtractor.extract(
             node.road,
             suffix_map=ROAD_STAT_SUFFIXES,
@@ -285,9 +280,19 @@ def _serialize_node(node: Any, geo: GeometryProcessor) -> Dict[str, Any]:
 
     pond_data = AttributeExtractor.extract(node.pond)
 
+    viz_data = None
+    if node.visualization:
+        viz_data = {
+            "ancestor_ewkt": node.visualization.ancestor_ewkt,
+            "local_ewkt": node.visualization.local_ewkt,
+            "descendant_ewkt": node.visualization.descendant_ewkt
+        }
+
     return {
         "point": geo.to_ewkt(node.point),
         "node_type": node.node_type.name if hasattr(node.node_type, "name") else str(node.node_type),
+        "terminal": node.terminal_in_base_graph,
+        "viz": viz_data,
         "elevation": node.elevation,
         "road_information": road_data,
         "runoff_information": runoff_data,

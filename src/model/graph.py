@@ -7,11 +7,12 @@ import numpy as np
 from copy import deepcopy
 
 from utils import funcs, config
+from .visualization import visualization_information
 
 class NodeType(Enum):
     DRAIN = 1 # Anywhere you have runoff converging (i.e., road drains and converging flowpaths)
     POND = 2
-    TERMINATION = 3
+    TERMINATING_FLOWPATH = 3
 
 @dataclass
 class RoadInformation:
@@ -162,12 +163,15 @@ class GraphNode:
     pond: PondInformation | None = None
 
     # Node Relationships
+    terminal_in_base_graph: bool = False
     child: shapely.geometry.point.Point | None = None
+    index_of_flowpath_to_child: int | None = None
     distance_to_child: float | None = None
     cost_to_connect_child: float | None = None
     volume_reaching_child: float | None = None
     sediment_reaching_child: float | None = None
     percent_reaching_child: float | None = None
+    visualization: visualization_information | None = None
 
 class Graph:
     def __init__(self) -> None:
@@ -176,6 +180,7 @@ class Graph:
         self.__G : nx.DiGraph = nx.DiGraph()
         self.add_nodes(data.ponds.get_nodes())
         self.add_nodes(data.drains.get_nodes())
+        self._mark_terminal_nodes()
 
     def copy(self) -> 'Graph':
         return deepcopy(self)
@@ -184,9 +189,18 @@ class Graph:
         for node, data in self.__G.nodes(data=True):
             print(f"Node {node}: {data.get('nodedata')}")
 
+    def _mark_terminal_nodes(self) -> None:
+        for node_point in self.__G.nodes:
+            if self.__G.out_degree(node_point) == 0:
+                nodedata = self.__G.nodes[node_point]['nodedata']
+                if isinstance(nodedata, GraphNode):
+                    nodedata.terminal_in_base_graph = True
+
     # This function exists because when populating the graph,
     # it is not garunteed that the child node exists so
-    # we add a provisional node.
+    # we add a provisional node. The child should always exist
+    # unless this was a terminating flowpath without a node
+    # marked at the end.
     def conditionally_add_provisional_node(
         self,
         point: shapely.geometry.point.Point,
@@ -195,8 +209,8 @@ class Graph:
         from .data import elevation
 
         if not self.__G.has_node(point):
-            terminal_node = GraphNode(point=point, node_type=NodeType.TERMINATION, elevation=elevation.sample_point(point))
-            self.__G.add_node(point, nodedata=terminal_node)
+            unlabeled_node = GraphNode(point=point, node_type=NodeType.TERMINATING_FLOWPATH, elevation=elevation.sample_point(point))
+            self.__G.add_node(point, nodedata=unlabeled_node)
 
     def add_node(
         self,
@@ -215,7 +229,7 @@ class Graph:
         self,
         nodes: List[GraphNode]
     ) -> None:
-        for node in nodes: 
+        for node in nodes:
             self.add_node(node)
             if not nx.is_directed_acyclic_graph(self.__G):
                 raise ValueError(f"Adding point {node.point} made the graph cycle.")
@@ -298,7 +312,7 @@ class Graph:
             self.__G.add_edge(parent_node_data.point, parent_node_data.child, weight=parent_node_data.distance_to_child)
 
         parent_node_data.percent_reaching_child = parent_node_data.volume_reaching_child / parent_node_data.runoff.sum
-        parent_node_data.sediment_reaching_child = parent_node_data.sediment.sum * parent_node_data.percent_reaching_child 
+        parent_node_data.sediment_reaching_child = parent_node_data.sediment.sum * parent_node_data.percent_reaching_child
 
         child_node_data.road._ancestor_indices = funcs.combine_dict_list(
             child_node_data.road._ancestor_indices,

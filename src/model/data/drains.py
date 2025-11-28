@@ -29,7 +29,7 @@ def get_nodes() -> List[GraphNode]:
         node.road._local_length = filtered_roads.groupby('TYPE')['LENGTH'].sum().to_dict()
         node.road._local_area = filtered_roads.groupby('TYPE')['AREA'].sum().to_dict()
 
-        node.child, node.distance_to_child, node.cost_to_connect_child = flowpaths.trace_drainage_endpoint(point)
+        node.child, node.distance_to_child, node.cost_to_connect_child, node.index_of_flowpath_to_child = flowpaths.trace_drainage_endpoint(point)
 
         nodes.append(node)
 
