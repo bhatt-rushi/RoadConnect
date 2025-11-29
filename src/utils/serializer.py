@@ -1,94 +1,92 @@
-import json
-from geopandas import gpd
+import sqlite3
 import networkx as nx
-from typing import List, Tuple, Dict, Any
-# Removed shapely imports as they were only used for indices_to_ewkt_map
+from typing import List, Tuple, Dict, Any, Set
+import os
 
-from model.data.roads import _gdf
-
-# NOTE: Serialized JSON Output
+# NOTE: Serialized SQLite Schema
 """
+The database (sqlite3) structure is designed to allow efficient querying of results
+by rainfall event or by specific nodes.
 
-{
-  "rainfall_events": [
-    {
-      "total_mm": <Float>,
-      "nodes": [
-        {
-          // LOCATION & TYPE
-          "point": "SRID=<int>;POINT(...)", // Format: EWKT
-          "node_type": "<String>",          // e.g., "DRAIN", "TERMINATION", "POND"
-          "elevation": <Float>,
+Tables and Relationships:
 
-          // VIZ INFORMATION (from model/visualization.py)
-          "viz": {
-             "ancestor_ewkt": "<EWKT>",
-             "local_ewkt": "<EWKT>",
-             "descendant_ewkt": "<EWKT>"
-          } | null,
+events
+  - id (INTEGER PRIMARY KEY)
+  - total_mm (REAL)
+  - is_summary (BOOLEAN)
 
-          // ROAD INFORMATION
-          "road_information": {
-            // Combined Statistics (from @property length/area)
-            "length_m": { "<SurfaceType>": <Float> },
-            "area_sqm": { "<SurfaceType>": <Float> },
+nodes
+  - id (INTEGER PRIMARY KEY)
+  - event_id (INTEGER, FK -> events.id)
+  - point (TEXT)
+  - node_type (TEXT)
+  - elevation (REAL)
+  - terminal (BOOLEAN)
 
-            // Split Statistics (Restored)
-            "local_length_m":    { "<SurfaceType>": <Float> },
-            "ancestor_length_m": { "<SurfaceType>": <Float> },
-            "local_area_sqm":    { "<SurfaceType>": <Float> },
-            "ancestor_area_sqm": { "<SurfaceType>": <Float> }
-          },
+visualization
+  - node_id (INTEGER PRIMARY KEY, FK -> nodes.id)
+  - ancestor_ewkt (TEXT)
+  - local_ewkt (TEXT)
+  - descendant_ewkt (TEXT)
 
-          // HYDROLOGY: RUNOFF
-          "runoff_information": {
-            "local_m3":    { "<SurfaceType>": <Float> },
-            "ancestor_m3": { "<SurfaceType>": <Float> },
-            "total_m3":    { "<SurfaceType>": <Float> }, // Derived from @property total
-            "sum_m3":      <Float>                       // Derived from @property sum (Scalar)
-          },
+road_surfaces
+  - id (INTEGER PRIMARY KEY)
+  - node_id (INTEGER, FK -> nodes.id)
+  - surface_type (TEXT)
+  - length_m (REAL)
+  - area_sqm (REAL)
+  - local_length_m (REAL)
+  - ancestor_length_m (REAL)
+  - local_area_sqm (REAL)
+  - ancestor_area_sqm (REAL)
 
-          // HYDROLOGY: SEDIMENT
-          "sediment_information": {
-            "local_kg":    { "<SurfaceType>": <Float> },
-            "ancestor_kg": { "<SurfaceType>": <Float> },
-            "total_kg":    { "<SurfaceType>": <Float> }, // Derived from @property total
-            "sum_kg":      <Float>                       // Derived from @property sum (Scalar)
-          },
+runoff
+  - node_id (INTEGER PRIMARY KEY, FK -> nodes.id)
+  - sum_m3 (REAL)
 
-          // POND DATA (Nullable: null if node is not a POND)
-          "pond_information": {
-            "max_capacity": <Float>,
-            "used_capacity": <Float>,
-            "available_capacity": <Float>,
-            "efficiency": <Float>,                       // 0.0 to 1.0
+runoff_surfaces
+  - id (INTEGER PRIMARY KEY)
+  - node_id (INTEGER, FK -> nodes.id)
+  - surface_type (TEXT)
+  - local_m3 (REAL)
+  - ancestor_m3 (REAL)
+  - total_m3 (REAL)
 
-            "runoff_in": <Float>,
-            "trapped_runoff": <Float>,
-            "runoff_out": <Float>,
-            "runoff_percent_difference": <Float>,
+sediment
+  - node_id (INTEGER PRIMARY KEY, FK -> nodes.id)
+  - sum_kg (REAL)
 
-            "sediment_in": <Float>,
-            "trapped_sediment": <Float>,
-            "sediment_out": <Float>,
-            "sediment_percent_difference": <Float>
-          } | null,
+sediment_surfaces
+  - id (INTEGER PRIMARY KEY)
+  - node_id (INTEGER, FK -> nodes.id)
+  - surface_type (TEXT)
+  - local_kg (REAL)
+  - ancestor_kg (REAL)
+  - total_kg (REAL)
 
-          // CONNECTIVITY (Nullable: null if node has no child)
-          "child_connection": {
-            "child_point": "SRID=<int>;POINT(...)",
-            "distance_to_child_m": <Float>,
-            "cost_to_connect_child": <Float>,
-            "volume_reaching_child_m3": <Float>,
-            "sediment_reaching_child_kg": <Float> | null,
-            "percent_reaching_child": <Float> | null
-          } | null
-        }
-      ]
-    }
-  ]
-}
+ponds
+  - node_id (INTEGER PRIMARY KEY, FK -> nodes.id)
+  - max_capacity (REAL)
+  - used_capacity (REAL)
+  - available_capacity (REAL)
+  - efficiency (REAL)
+  - runoff_in (REAL)
+  - trapped_runoff (REAL)
+  - runoff_out (REAL)
+  - runoff_percent_difference (REAL)
+  - sediment_in (REAL)
+  - trapped_sediment (REAL)
+  - sediment_out (REAL)
+  - sediment_percent_difference (REAL)
 
+connections
+  - node_id (INTEGER PRIMARY KEY, FK -> nodes.id)
+  - child_point (TEXT)
+  - distance_to_child_m (REAL)
+  - cost_to_connect_child (REAL)
+  - volume_reaching_child_m3 (REAL)
+  - sediment_reaching_child_kg (REAL)
+  - percent_reaching_child (REAL)
 """
 
 # --- DEFINE SUFFIXES ---
@@ -98,19 +96,6 @@ ROAD_STAT_SUFFIXES = {"length": "_m", "area": "_sqm"}
 
 
 # --- ABSTRACTION LAYERS ---
-
-# TODO: Rewrite this class to handle not just roads but also polygons for coffee farms
-class GeometryProcessor:
-    def __init__(self):
-        self.gdf: gpd.GeoDataFrame = _gdf
-
-        if self.gdf.crs is None:
-            raise ValueError("_gdf has not CRS")
-        self.srid = self.gdf.crs.to_epsg()
-
-    def to_ewkt(self, geom: Any) -> str:
-        return f"SRID={self.srid};{getattr(geom, 'wkt', str(geom))}"
-
 
 class AttributeExtractor:
     """
@@ -166,83 +151,297 @@ class AttributeExtractor:
         return cleaned_result
 
 
+# --- DATABASE MANAGER ---
+
+class DatabaseManager:
+    def __init__(self, db_path: str):
+        self.conn = sqlite3.connect(db_path)
+        self.cursor = self.conn.cursor()
+        self._init_schema()
+
+    def close(self):
+        self.conn.commit()
+        self.conn.close()
+
+    def _init_schema(self):
+        commands = [
+            """CREATE TABLE IF NOT EXISTS events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                total_mm REAL NOT NULL,
+                is_summary BOOLEAN DEFAULT 0
+            )""",
+            """CREATE TABLE IF NOT EXISTS nodes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id INTEGER,
+                point TEXT,
+                node_type TEXT,
+                elevation REAL,
+                terminal BOOLEAN,
+                FOREIGN KEY(event_id) REFERENCES events(id)
+            )""",
+            """CREATE TABLE IF NOT EXISTS visualization (
+                node_id INTEGER PRIMARY KEY,
+                ancestor_ewkt TEXT,
+                local_ewkt TEXT,
+                descendant_ewkt TEXT,
+                FOREIGN KEY(node_id) REFERENCES nodes(id)
+            )""",
+            """CREATE TABLE IF NOT EXISTS road_surfaces (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                node_id INTEGER,
+                surface_type TEXT,
+                length_m REAL,
+                area_sqm REAL,
+                local_length_m REAL,
+                ancestor_length_m REAL,
+                local_area_sqm REAL,
+                ancestor_area_sqm REAL,
+                FOREIGN KEY(node_id) REFERENCES nodes(id)
+            )""",
+            """CREATE TABLE IF NOT EXISTS runoff (
+                node_id INTEGER PRIMARY KEY,
+                sum_m3 REAL,
+                FOREIGN KEY(node_id) REFERENCES nodes(id)
+            )""",
+            """CREATE TABLE IF NOT EXISTS runoff_surfaces (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                node_id INTEGER,
+                surface_type TEXT,
+                local_m3 REAL,
+                ancestor_m3 REAL,
+                total_m3 REAL,
+                FOREIGN KEY(node_id) REFERENCES nodes(id)
+            )""",
+            """CREATE TABLE IF NOT EXISTS sediment (
+                node_id INTEGER PRIMARY KEY,
+                sum_kg REAL,
+                FOREIGN KEY(node_id) REFERENCES nodes(id)
+            )""",
+            """CREATE TABLE IF NOT EXISTS sediment_surfaces (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                node_id INTEGER,
+                surface_type TEXT,
+                local_kg REAL,
+                ancestor_kg REAL,
+                total_kg REAL,
+                FOREIGN KEY(node_id) REFERENCES nodes(id)
+            )""",
+            """CREATE TABLE IF NOT EXISTS ponds (
+                node_id INTEGER PRIMARY KEY,
+                max_capacity REAL,
+                used_capacity REAL,
+                available_capacity REAL,
+                efficiency REAL,
+                runoff_in REAL,
+                trapped_runoff REAL,
+                runoff_out REAL,
+                runoff_percent_difference REAL,
+                sediment_in REAL,
+                trapped_sediment REAL,
+                sediment_out REAL,
+                sediment_percent_difference REAL,
+                FOREIGN KEY(node_id) REFERENCES nodes(id)
+            )""",
+            """CREATE TABLE IF NOT EXISTS connections (
+                node_id INTEGER PRIMARY KEY,
+                child_point TEXT,
+                distance_to_child_m REAL,
+                cost_to_connect_child REAL,
+                volume_reaching_child_m3 REAL,
+                sediment_reaching_child_kg REAL,
+                percent_reaching_child REAL,
+                FOREIGN KEY(node_id) REFERENCES nodes(id)
+            )""",
+            # Indices for performance
+            "CREATE INDEX IF NOT EXISTS idx_nodes_event_id ON nodes(event_id)",
+            "CREATE INDEX IF NOT EXISTS idx_road_surfaces_node_id ON road_surfaces(node_id)",
+            "CREATE INDEX IF NOT EXISTS idx_runoff_surfaces_node_id ON runoff_surfaces(node_id)",
+            "CREATE INDEX IF NOT EXISTS idx_sediment_surfaces_node_id ON sediment_surfaces(node_id)"
+        ]
+        for cmd in commands:
+            self.cursor.execute(cmd)
+        self.conn.commit()
+
+    def insert_event(self, total_mm: float, is_summary: bool = False) -> int:
+        self.cursor.execute(
+            "INSERT INTO events (total_mm, is_summary) VALUES (?, ?)",
+            (total_mm, is_summary)
+        )
+        return self.cursor.lastrowid
+
+    def insert_node(self, event_id: int, node_data: Any) -> int:
+        point = str(node_data.point)
+        node_type = node_data.node_type.name if hasattr(node_data.node_type, "name") else str(node_data.node_type)
+
+        self.cursor.execute(
+            """INSERT INTO nodes (event_id, point, node_type, elevation, terminal)
+               VALUES (?, ?, ?, ?, ?)""",
+            (event_id, point, node_type, node_data.elevation, node_data.terminal_in_base_graph)
+        )
+        node_id = self.cursor.lastrowid
+
+        # Insert related data
+        self._insert_visualization(node_id, node_data.visualization)
+        self._insert_road_info(node_id, node_data.road)
+        self._insert_runoff_info(node_id, node_data.runoff)
+        self._insert_sediment_info(node_id, node_data.sediment)
+        self._insert_pond_info(node_id, node_data.pond)
+        self._insert_connection_info(node_id, node_data) # node_data has child info
+
+        return node_id
+
+    def _insert_visualization(self, node_id: int, viz: Any):
+        if not viz: return
+        self.cursor.execute(
+            """INSERT INTO visualization (node_id, ancestor_ewkt, local_ewkt, descendant_ewkt)
+               VALUES (?, ?, ?, ?)""",
+            (node_id, viz.ancestor_ewkt, viz.local_ewkt, viz.descendant_ewkt)
+        )
+
+    def _insert_road_info(self, node_id: int, road: Any):
+        if not road: return
+        stats = AttributeExtractor.extract(
+            road,
+            suffix_map=ROAD_STAT_SUFFIXES,
+            exclude_patterns=["indices", "graph", "point"]
+        )
+
+        # Transpose stats to surface-based rows
+        surfaces = self._transpose_stats(stats)
+
+        for surface, data in surfaces.items():
+            self.cursor.execute(
+                """INSERT INTO road_surfaces
+                   (node_id, surface_type, length_m, area_sqm, local_length_m, ancestor_length_m, local_area_sqm, ancestor_area_sqm)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    node_id, surface,
+                    data.get('length_m'), data.get('area_sqm'),
+                    data.get('local_length_m'), data.get('ancestor_length_m'),
+                    data.get('local_area_sqm'), data.get('ancestor_area_sqm')
+                )
+            )
+
+    def _insert_runoff_info(self, node_id: int, runoff: Any):
+        if not runoff: return
+        data = AttributeExtractor.extract(runoff, suffix_map=HYDROLOGY_SUFFIXES)
+
+        # Scalar
+        if 'sum_m3' in data:
+            self.cursor.execute(
+                "INSERT INTO runoff (node_id, sum_m3) VALUES (?, ?)",
+                (node_id, data['sum_m3'])
+            )
+
+        # Surfaces
+        surfaces = self._transpose_stats(data, exclude_keys={'sum_m3'})
+        for surface, s_data in surfaces.items():
+             self.cursor.execute(
+                """INSERT INTO runoff_surfaces (node_id, surface_type, local_m3, ancestor_m3, total_m3)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (node_id, surface, s_data.get('local_m3'), s_data.get('ancestor_m3'), s_data.get('total_m3'))
+            )
+
+    def _insert_sediment_info(self, node_id: int, sediment: Any):
+        if not sediment: return
+        data = AttributeExtractor.extract(sediment, suffix_map=SEDIMENT_SUFFIXES)
+
+        # Scalar
+        if 'sum_kg' in data:
+            self.cursor.execute(
+                "INSERT INTO sediment (node_id, sum_kg) VALUES (?, ?)",
+                (node_id, data['sum_kg'])
+            )
+
+        # Surfaces
+        surfaces = self._transpose_stats(data, exclude_keys={'sum_kg'})
+        for surface, s_data in surfaces.items():
+             self.cursor.execute(
+                """INSERT INTO sediment_surfaces (node_id, surface_type, local_kg, ancestor_kg, total_kg)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (node_id, surface, s_data.get('local_kg'), s_data.get('ancestor_kg'), s_data.get('total_kg'))
+            )
+
+    def _insert_pond_info(self, node_id: int, pond: Any):
+        if not pond: return
+        data = AttributeExtractor.extract(pond)
+
+        self.cursor.execute(
+            """INSERT INTO ponds (
+                node_id, max_capacity, used_capacity, available_capacity, efficiency,
+                runoff_in, trapped_runoff, runoff_out, runoff_percent_difference,
+                sediment_in, trapped_sediment, sediment_out, sediment_percent_difference
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                node_id, data.get('max_capacity'), data.get('used_capacity'), data.get('available_capacity'), data.get('efficiency'),
+                data.get('runoff_in'), data.get('trapped_runoff'), data.get('runoff_out'), data.get('runoff_percent_difference'),
+                data.get('sediment_in'), data.get('trapped_sediment'), data.get('sediment_out'), data.get('sediment_percent_difference')
+            )
+        )
+
+    def _insert_connection_info(self, node_id: int, node: Any):
+        if node.child is None: return
+
+        child_point = str(node.child)
+
+        self.cursor.execute(
+            """INSERT INTO connections (
+                node_id, child_point, distance_to_child_m, cost_to_connect_child,
+                volume_reaching_child_m3, sediment_reaching_child_kg, percent_reaching_child
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                node_id, child_point, node.distance_to_child, node.cost_to_connect_child,
+                node.volume_reaching_child, node.sediment_reaching_child, node.percent_reaching_child
+            )
+        )
+
+    def _transpose_stats(self, flat_data: Dict[str, Any], exclude_keys: Set[str] = None) -> Dict[str, Dict[str, Any]]:
+        """
+        Converts { 'stat_name': { 'surface': val, ... }, ... }
+        into { 'surface': { 'stat_name': val, ... }, ... }
+        """
+        surfaces = {}
+        for stat_name, val_map in flat_data.items():
+            if exclude_keys and stat_name in exclude_keys: continue
+
+            if isinstance(val_map, dict):
+                for surface, val in val_map.items():
+                    if surface not in surfaces:
+                        surfaces[surface] = {}
+                    surfaces[surface][stat_name] = val
+            # Handle non-dict values if any (though normally they are scalars handled separately)
+        return surfaces
+
+
 # --- MAIN SERIALIZER ---
 
 def serialize_rainfall_data(data: List[Tuple[float, nx.DiGraph]], output_filename: str, summary_graph: nx.DiGraph | None = None):
-    geo = GeometryProcessor()
-    output = {"rainfall_events": []}
+    """
+    Serializes rainfall data and summary graph to a SQLite database.
+    """
+    if os.path.exists(output_filename):
+        os.remove(output_filename)
 
-    for rainfall_total, graph in data:
-        event = {"total_mm": rainfall_total, "nodes": []}
-        for n_id in graph.nodes():
-            node_data = graph.nodes[n_id].get("nodedata")
-            if node_data:
-                event["nodes"].append(_serialize_node(node_data, geo))
-        output["rainfall_events"].append(event)
+    db = DatabaseManager(output_filename)
 
-    if summary_graph:
-        output["summary"] = {"nodes": []}
-        for n_id in summary_graph.nodes():
-            node_data = summary_graph.nodes[n_id].get("nodedata")
-            if node_data:
-                output["summary"]["nodes"].append(_serialize_node(node_data, geo))
+    try:
+        # Save Events
+        for rainfall_total, graph in data:
+            event_id = db.insert_event(rainfall_total, is_summary=False)
+            for n_id in graph.nodes():
+                node_data = graph.nodes[n_id].get("nodedata")
+                if node_data:
+                    db.insert_node(event_id, node_data)
 
-    with open(output_filename, 'w') as f:
-        json.dump(output, f, indent=2)
-    print(f"Saved {len(data)} events to {output_filename}")
+        # Save Summary
+        if summary_graph:
+            summary_id = db.insert_event(-1.0, is_summary=True) # -1.0 as placeholder for summary
+            for n_id in summary_graph.nodes():
+                node_data = summary_graph.nodes[n_id].get("nodedata")
+                if node_data:
+                    db.insert_node(summary_id, node_data)
 
+        print(f"Saved {len(data)} events (and summary={bool(summary_graph)}) to {output_filename}")
 
-def _serialize_node(node: Any, geo: GeometryProcessor) -> Dict[str, Any]:
-
-    child_info = None
-    if node.child is not None:
-        child_info = {
-            "child_point": geo.to_ewkt(node.child),
-            "distance_to_child_m": node.distance_to_child,
-            "cost_to_connect_child": node.cost_to_connect_child,
-            "volume_reaching_child_m3": node.volume_reaching_child,
-            "sediment_reaching_child_kg": node.sediment_reaching_child,
-            "percent_reaching_child": node.percent_reaching_child
-        }
-
-    road_data = {}
-    if node.road:
-        stats = AttributeExtractor.extract(
-            node.road,
-            suffix_map=ROAD_STAT_SUFFIXES,
-            exclude_patterns=["indices", "graph", "point"] # Exclude internal structures
-        )
-        road_data.update(stats)
-
-    runoff_data = AttributeExtractor.extract(
-        node.runoff,
-        suffix_map=HYDROLOGY_SUFFIXES
-    )
-
-    sediment_data = AttributeExtractor.extract(
-        node.sediment,
-        suffix_map=SEDIMENT_SUFFIXES
-    )
-
-    pond_data = AttributeExtractor.extract(node.pond)
-
-    viz_data = None
-    if node.visualization:
-        viz_data = {
-            "ancestor_ewkt": node.visualization.ancestor_ewkt,
-            "local_ewkt": node.visualization.local_ewkt,
-            "descendant_ewkt": node.visualization.descendant_ewkt
-        }
-
-    return {
-        "point": geo.to_ewkt(node.point),
-        "node_type": node.node_type.name if hasattr(node.node_type, "name") else str(node.node_type),
-        "terminal": node.terminal_in_base_graph,
-        "viz": viz_data,
-        "elevation": node.elevation,
-        "road_information": road_data,
-        "runoff_information": runoff_data,
-        "sediment_information": sediment_data,
-        "pond_information": pond_data or None,
-        "child_connection": child_info
-    }
+    finally:
+        db.close()
