@@ -168,7 +168,7 @@ class AttributeExtractor:
 
 # --- MAIN SERIALIZER ---
 
-def serialize_rainfall_data(data: List[Tuple[float, nx.DiGraph]], output_filename: str):
+def serialize_rainfall_data(data: List[Tuple[float, nx.DiGraph]], output_filename: str, summary_graph: nx.DiGraph | None = None):
     geo = GeometryProcessor()
     output = {"rainfall_events": []}
 
@@ -179,6 +179,13 @@ def serialize_rainfall_data(data: List[Tuple[float, nx.DiGraph]], output_filenam
             if node_data:
                 event["nodes"].append(_serialize_node(node_data, geo))
         output["rainfall_events"].append(event)
+
+    if summary_graph:
+        output["summary"] = {"nodes": []}
+        for n_id in summary_graph.nodes():
+            node_data = summary_graph.nodes[n_id].get("nodedata")
+            if node_data:
+                output["summary"]["nodes"].append(_serialize_node(node_data, geo))
 
     with open(output_filename, 'w') as f:
         json.dump(output, f, indent=2)

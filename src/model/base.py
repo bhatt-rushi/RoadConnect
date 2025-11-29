@@ -1,7 +1,7 @@
 # /src/model/base.py
 from typing import List, Tuple
 from utils import config
-from model import graph, visualization
+from model import graph, visualization, summary
 import networkx as nx
 from tqdm import tqdm
 
@@ -16,6 +16,7 @@ class Model:
     def __post_init__(self) -> None:
         self.results : List[Tuple[float, nx.DiGraph]] = []
         self.run()
+        self.summary = summary.create_summary_graph(self.results)
 
     def load_config_values(self):
         # Load values from configuration file
