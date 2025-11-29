@@ -1,5 +1,6 @@
 {
-    "rainfall_values": [50, 40, 30, 44, 55, 23, 13, 34],
+    "rainfall_values": [50, 40, 9999999999999999, 44, 55, 23, 13, 34],
+    "bulk_density": 1000.0,
     "travel_cost": 0.01,
     "road_types": {
         "sand": {

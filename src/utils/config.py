@@ -5,7 +5,7 @@ from typing import List, Dict, TypedDict
 
 CONFIG_PATH = os.path.join(
         os.getcwd(),
-        'config', 
+        'config',
         'config.json'
     )
 
@@ -24,6 +24,30 @@ def get_rainfall_values() -> List[float]:
 
     except KeyError:
         raise KeyError("'rainfall_values' not found in the configuration file")
+
+def get_bulk_density() -> float:
+    try:
+        with open(CONFIG_PATH, 'r') as config_file:
+            config_data = json.load(config_file)
+
+            # Extract bulk density
+            bulk_density = config_data['bulk_density']
+
+            # Validate type (must be int or float)
+            if not isinstance(bulk_density, (int, float)):
+                raise ValueError("bulk_density must be a number (int or float)")
+
+            # Convert to float
+            bulk_density = float(bulk_density)
+
+            # Validate non-negative
+            if bulk_density <= 0:
+                raise ValueError("bulk_density must be a positive number")
+
+            return bulk_density
+
+    except KeyError:
+        raise KeyError("'bulk_density' not found in the configuration file")
 
 def get_flowpath_travel_cost() -> float:
     try:
@@ -140,3 +164,51 @@ def resolve_ponds_data_path() -> Path:
 
 def resolve_elevation_data_path() -> Path:
     return __resolve_data_path('elevation')
+
+def validate_crs() -> None:
+    import geopandas as gpd
+    import rasterio
+    from pyproj import CRS
+
+    # Reference CRS from drains
+    drains_path = resolve_drains_data_path()
+    try:
+        drains_gdf = gpd.read_file(drains_path)
+    except Exception as e:
+         raise ValueError(f"Failed to read drains file: {e}")
+
+    target_crs = drains_gdf.crs
+
+    if target_crs is None:
+         raise ValueError(f"Drains file {drains_path} has no CRS defined.")
+
+    # Check other vector files
+    vector_paths = {
+        'roads': resolve_roads_data_path(),
+        'flowpaths': resolve_flowpaths_data_path(),
+        'ponds': resolve_ponds_data_path()
+    }
+
+    for name, path in vector_paths.items():
+        try:
+            gdf = gpd.read_file(path)
+        except Exception as e:
+             raise ValueError(f"Failed to read {name} file: {e}")
+
+        if gdf.crs != target_crs:
+             raise ValueError(f"{name} file {path} CRS ({gdf.crs}) does not match drains CRS ({target_crs})")
+
+    # Check raster file
+    elevation_path = resolve_elevation_data_path()
+    try:
+        with rasterio.open(elevation_path) as src:
+            if src.crs is None:
+                 raise ValueError(f"Elevation file {elevation_path} has no CRS defined.")
+
+            # Convert rasterio CRS to pyproj CRS for comparison
+            src_crs_pyproj = CRS(src.crs)
+
+            if src_crs_pyproj != target_crs:
+                 raise ValueError(f"Elevation file {elevation_path} CRS ({src_crs_pyproj}) does not match drains CRS ({target_crs})")
+    except Exception as e:
+        raise ValueError(f"Failed to read elevation file or validate CRS: {e}")

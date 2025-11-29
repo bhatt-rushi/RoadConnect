@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 class Model:
     def __init__(self) -> None:
-        # TODO: Check that all CRS match
+        config.validate_crs()
         self.load_config_values()
         self.base_graph = graph.Graph()
 
@@ -26,6 +26,10 @@ class Model:
         for rainfall_event_total in tqdm(self.rainfall_events, total=len(self.rainfall_events)):
             g = self.base_graph.copy()
             g.simulate_rainfall(rainfall_event_total)
+
+            # Update the base_graph with the new used_capacity for ponds
+            pond_updates = g.get_pond_update_data()
+            self.base_graph.update_pond_capacities(pond_updates)
 
             nx_graph = g.to_networkx_graph()
             for point in nx_graph.nodes:

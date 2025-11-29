@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List
+from typing import Dict, List, Tuple
 import shapely.geometry
 import networkx as nx
 import numpy as np
@@ -245,6 +245,7 @@ class Graph:
 
         self.flowpath_travel_cost: float = config.get_flowpath_travel_cost()
         self.road_types: Dict[str, config.RoadTypeData] = config.get_road_types()
+        self.bulk_density: float = config.get_bulk_density()
         self.rainfall_event_size = rainfall_event_size
 
         self.__G.clear_edges() # We're only going to add edges if runoff > cost
@@ -287,7 +288,6 @@ class Graph:
             )
 
     def __process_pond_node(self, nodedata: GraphNode) -> None:
-        # TODO: Get the bulk density of sediments to update used_capacity between rainfall events
 
         if not nodedata.pond:
             raise ValueError(f"Pond node {nodedata.point} does not have have a pond structure!") # This should never be the case
@@ -300,6 +300,30 @@ class Graph:
 
         nodedata.runoff._local = funcs.scale_dict(nodedata.runoff._ancestor, nodedata.pond.runoff_percent_difference)
         nodedata.sediment._local = funcs.scale_dict(nodedata.sediment._ancestor, nodedata.pond.sediment_percent_difference)
+
+    def get_pond_update_data(self) -> List[Tuple[shapely.geometry.point.Point, float]]:
+        updates = []
+        for node_point in self.__G.nodes:
+            nodedata = self.__G.nodes[node_point]['nodedata']
+            if isinstance(nodedata, GraphNode) and nodedata.node_type == NodeType.POND and nodedata.pond:
+
+                current_capacity = nodedata.pond.used_capacity
+                additional_capacity = 0.0
+
+                # Calculate sediment accumulation if density is set and sediment entered
+                if self.bulk_density > 0 and nodedata.pond._sediment_in is not None:
+                     additional_capacity = nodedata.pond._sediment_in / self.bulk_density
+
+                new_capacity = min(nodedata.pond.max_capacity, current_capacity + additional_capacity)
+                updates.append((node_point, new_capacity))
+        return updates
+
+    def update_pond_capacities(self, updates: List[Tuple[shapely.geometry.point.Point, float]]) -> None:
+        for point, used_capacity in updates:
+             if self.__G.has_node(point):
+                nodedata = self.__G.nodes[point]['nodedata']
+                if isinstance(nodedata, GraphNode) and nodedata.pond:
+                    nodedata.pond.used_capacity = used_capacity
 
     def __process_child_node(self, parent_node_data: GraphNode, child_node_data: GraphNode) -> None:
         if not parent_node_data.cost_to_connect_child:
