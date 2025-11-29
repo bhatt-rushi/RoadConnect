@@ -25,9 +25,7 @@ def get_nodes() -> List[GraphNode]:
         )
 
         filtered_roads = roads._gdf[roads._gdf['DRAIN_IDX'] == point]
-        node.road._local_indices = filtered_roads.groupby('TYPE')['index'].apply(list).to_dict()
-        node.road._local_length = filtered_roads.groupby('TYPE')['LENGTH'].sum().to_dict()
-        node.road._local_area = filtered_roads.groupby('TYPE')['AREA'].sum().to_dict()
+        node.road._local_indices = {k: set(v) for k, v in filtered_roads.groupby('TYPE').groups.items()}
 
         node.child, node.distance_to_child, node.cost_to_connect_child, node.index_of_flowpath_to_child = flowpaths.trace_drainage_endpoint(point)
 

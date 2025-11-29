@@ -3,152 +3,20 @@ from enum import Enum
 from typing import Dict, List, Tuple
 import shapely.geometry
 import networkx as nx
-import numpy as np
 from copy import deepcopy
 
-from utils import funcs, config
+from utils import funcs
+
+from .road import RoadInformation
+from .runoff import RunoffInformation
+from .sediment import SedimentInformation
+from .pond import PondInformation
 from .visualization import visualization_information
 
 class NodeType(Enum):
     DRAIN = 1 # Anywhere you have runoff converging (i.e., road drains and converging flowpaths)
     POND = 2
     TERMINATING_FLOWPATH = 3
-
-@dataclass
-class RoadInformation:
-
-    # NOTE: Inherited
-    _ancestor_indices: Dict[str, List[int]] = field(default_factory=dict)
-    _ancestor_length: Dict[str, float] = field(default_factory=dict)
-    _ancestor_area: Dict[str, float] = field(default_factory=dict)
-
-    # NOTE: Local
-    _local_indices: Dict[str, List[int]] = field(default_factory=dict)
-    _local_length: Dict[str, float] = field(default_factory=dict)
-    _local_area: Dict[str, float] = field(default_factory=dict)
-
-    # NOTE: Inherited + Local
-    @property
-    def indices(self) -> Dict[str, List[int]]: return funcs.combine_dict_list(self._ancestor_indices, self._local_indices)
-
-    @property
-    def length(self) -> Dict[str, float]: return funcs.combine_dict(self._ancestor_length, self._local_length)
-
-    @property
-    def area(self) -> Dict[str, float]: return funcs.combine_dict(self._ancestor_area, self._local_area)
-
-@dataclass
-class RunoffInformation:
-
-    # NOTE: Inherited
-    _ancestor: Dict[str, float] = field(default_factory=dict)
-
-    # NOTE: Local
-    _local: Dict[str, float] = field(default_factory=dict)
-
-    # NOTE: Inherited + Local
-    @property
-    def total(self) -> Dict[str, float]: return funcs.combine_dict(self._ancestor, self._local)
-    @property
-    def sum(self) -> float: return funcs.sum_dict(self.total)
-
-    def _calculate_local_runoff(self, area: Dict[str, float], rainfall_amount: float, coefficients: Dict[str, config.RoadTypeData]) -> None:
-
-        for surface_type, surface_area in area.items():
-            road_type_data: config.RoadTypeData = coefficients[surface_type] # The reason I don't have any error handling here is because I check to make sure that all road types exist in data/roads.py with __vd_road_types()
-
-            # Calculate runoff volume: Area * Rainfall * Runoff Coefficient
-            # Assumes rainfall is in mm and area is in square meters
-            runoff_volume = surface_area * (rainfall_amount / 1000) * road_type_data['runoff_coefficient']
-
-            self._local[surface_type] = runoff_volume
-
-@dataclass
-class SedimentInformation:
-
-    # NOTE: Inherited
-    _ancestor: Dict[str, float] = field(default_factory=dict)
-
-    # NOTE: Local
-    _local: Dict[str, float] = field(default_factory=dict)
-
-    # NOTE: Inherited + Local
-    @property
-    def total(self) -> Dict[str, float]: return funcs.combine_dict(self._ancestor, self._local)
-    @property
-    def sum(self) -> float: return funcs.sum_dict(self.total)
-
-    def _calculate_local_sediment(self, area: Dict[str, float], rainfall_amount: float, coefficients: Dict[str, config.RoadTypeData]) -> None:
-
-        for surface_type, surface_area in area.items():
-            road_type_data: config.RoadTypeData = coefficients[surface_type] # The reason I don't have any error handling here is because I check to make sure that all road types exist in data/roads.py with __vd_road_types()
-
-            # Calculate sediment mass: Area * Rainfall * Erosion Coefficient
-            # Assumes rainfall is in mm and area is in square meters
-            sediment_mass = surface_area * (rainfall_amount / 1000) * road_type_data['erosion_rate']
-
-            self._local[surface_type] = sediment_mass
-
-@dataclass
-class PondInformation:
-    max_capacity: float
-    used_capacity: float
-
-    _runoff_in: float | None = None
-    _sediment_in: float | None = None
-
-    @property
-    def _available_capacity(self) -> float: return self.max_capacity - self.used_capacity
-
-    @property
-    def _trapped_runoff(self) -> float:
-        if self._runoff_in is None:
-            raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _runoff_in")
-        return min(self._available_capacity, self._runoff_in)
-
-    @property
-    def _runoff_out(self) -> float:
-        if self._runoff_in is None:
-            raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _runoff_in")
-        return self._runoff_in - self._trapped_runoff
-
-    @property
-    def runoff_percent_difference(self) -> float:
-        if self._runoff_in is None:
-            raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _runoff_in")
-        return funcs.percent_difference(self._runoff_out, self._runoff_in)
-
-    @property
-    def _efficiency(self) -> float:
-        if self._runoff_in is None:
-            raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _runoff_in")
-
-        if self._runoff_out == 0:
-            return 1.0
-        else:
-            return float(np.clip(
-                -22 + ( ( 119 * ( self._available_capacity / self._runoff_in ) ) / ( 0.012 + 1.02 * (self._available_capacity / self._runoff_in ) ) ),
-                0, # Minimum Efficiency
-                100 # Max Efficiency
-            ) / 100) # Convert to percent
-
-    @property
-    def _trapped_sediment(self) -> float:
-        if self._sediment_in is None:
-            raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _sediment_in")
-        return self._sediment_in * self._efficiency
-
-    @property
-    def _sediment_out(self) -> float:
-        if self._sediment_in is None:
-            raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _sediment_in")
-        return self._sediment_in - self._trapped_sediment
-
-    @property
-    def sediment_percent_difference(self) -> float:
-        if self._sediment_in is None:
-            raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _sediment_in")
-        return funcs.percent_difference(self._sediment_out, self._sediment_in)
 
 @dataclass
 class GraphNode:
@@ -210,6 +78,8 @@ class Graph:
 
         if not self.__G.has_node(point):
             unlabeled_node = GraphNode(point=point, node_type=NodeType.TERMINATING_FLOWPATH, elevation=elevation.sample_point(point))
+            unlabeled_node.road.graph = self.__G
+            unlabeled_node.road.point = point
             self.__G.add_node(point, nodedata=unlabeled_node)
 
     def add_node(
@@ -219,6 +89,8 @@ class Graph:
         if bool(node.child) != bool(node.distance_to_child):
             raise ValueError("child_node and distance_to_child must either both be None or non-None")
 
+        node.road.graph = self.__G
+        node.road.point = node.point
         self.__G.add_node(node.point, nodedata=node)
 
         if node.child is not None:
@@ -337,21 +209,6 @@ class Graph:
 
         parent_node_data.percent_reaching_child = parent_node_data.volume_reaching_child / parent_node_data.runoff.sum
         parent_node_data.sediment_reaching_child = parent_node_data.sediment.sum * parent_node_data.percent_reaching_child
-
-        child_node_data.road._ancestor_indices = funcs.combine_dict_list(
-            child_node_data.road._ancestor_indices,
-            parent_node_data.road.indices
-        )
-
-        child_node_data.road._ancestor_length = funcs.combine_dict(
-            child_node_data.road._ancestor_length,
-            parent_node_data.road.length
-        )
-
-        child_node_data.road._ancestor_area = funcs.combine_dict(
-            child_node_data.road._ancestor_area,
-            parent_node_data.road.area
-        )
 
         child_node_data.runoff._ancestor = funcs.combine_dict(
             child_node_data.runoff._ancestor,

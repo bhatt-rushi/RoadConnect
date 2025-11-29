@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Set
 import shapely.ops
 import geopandas as gpd
 
@@ -20,12 +20,22 @@ def generate_wkt(geometries: List[shapely.geometry.base.BaseGeometry], srid: int
 
     return f"SRID={srid};{simplified.wkt}"
 
-def combine_dict(A: Dict[str, float], B: Dict[str, float]) -> Dict[str, float]:
+def combine_dict(*dicts: Dict[str, float]) -> Dict[str, float]:
     from collections import Counter
-    return dict(Counter(A) + Counter(B))
+    # Sum all Counters, starting with an empty Counter to handle the first addition
+    return dict(sum((Counter(d) for d in dicts), Counter()))
 
-def combine_dict_list(A: Dict[str, List[int]], B: Dict[str, List[int]]) -> Dict[str, List[int]]:
-    return {k: A.get(k, []) + B.get(k, []) for k in set(A) | set(B)}
+def combine_dict_list(*dicts: Dict[str, List[int]]) -> Dict[str, List[int]]:
+    return {
+        k: [x for d in dicts for x in d.get(k, [])]
+        for k in set().union(*dicts)
+    }
+
+def combine_dict_set(*dicts: Dict[str, Set[int]]) -> Dict[str, Set[int]]:
+    return {
+        k: set().union(*(d.get(k, set()) for d in dicts))
+        for k in set().union(*dicts)
+    }
 
 def scale_dict(input_dict: Dict[str, float], scaling_factor: float) -> Dict[str, float]:
     return {key: value * scaling_factor for key, value in input_dict.items()}

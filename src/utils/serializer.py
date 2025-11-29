@@ -2,8 +2,7 @@ import json
 from geopandas import gpd
 import networkx as nx
 from typing import List, Tuple, Dict, Any
-from shapely.ops import linemerge
-from shapely.geometry import MultiLineString, LineString
+# Removed shapely imports as they were only used for indices_to_ewkt_map
 
 from model.data.roads import _gdf
 
@@ -21,19 +20,20 @@ from model.data.roads import _gdf
           "node_type": "<String>",          // e.g., "DRAIN", "TERMINATION", "POND"
           "elevation": <Float>,
 
-          // ROAD INFORMATION
-          // Note: All "wkt" fields contain lists of merged LineStrings in EWKT format.
-          "road_information": {
-            // 1. Geometries
-            "wkt":          { "<SurfaceType>": ["<EWKT>"] }, // Derived from combined @property indices
-            "local_wkt":    { "<SurfaceType>": ["<EWKT>"] }, // Derived from _local_indices
-            "ancestor_wkt": { "<SurfaceType>": ["<EWKT>"] }, // Derived from _ancestor_indices
+          // VIZ INFORMATION (from model/visualization.py)
+          "viz": {
+             "ancestor_ewkt": "<EWKT>",
+             "local_ewkt": "<EWKT>",
+             "descendant_ewkt": "<EWKT>"
+          } | null,
 
-            // 2. Combined Statistics (from @property length/area)
+          // ROAD INFORMATION
+          "road_information": {
+            // Combined Statistics (from @property length/area)
             "length_m": { "<SurfaceType>": <Float> },
             "area_sqm": { "<SurfaceType>": <Float> },
 
-            // 3. Split Statistics (Restored)
+            // Split Statistics (Restored)
             "local_length_m":    { "<SurfaceType>": <Float> },
             "ancestor_length_m": { "<SurfaceType>": <Float> },
             "local_area_sqm":    { "<SurfaceType>": <Float> },
@@ -110,67 +110,6 @@ class GeometryProcessor:
 
     def to_ewkt(self, geom: Any) -> str:
         return f"SRID={self.srid};{getattr(geom, 'wkt', str(geom))}"
-
-    def indices_to_ewkt_map(self, indices_map: Dict[str, List[int]]) -> Dict[str, List[str]]:
-            result_map = {}
-
-            if not indices_map:
-                return result_map
-
-            for surface_type, road_segment_indices in indices_map.items():
-                # If the list of indices is empty, we return an empty list for this surface.
-                # This is considered expected behavior, not an error.
-                if not road_segment_indices:
-                    result_map[surface_type] = []
-                    continue
-
-                try:
-                    # 1. GDF Lookup
-                    # This will raise a KeyError natively if indices are missing in standard Pandas usage
-                    selected_rows = self.gdf.loc[road_segment_indices]
-
-                    # Safety check: Verify we actually got geometries back
-                    road_segment_geometries = selected_rows.geometry.tolist()
-
-                    if not road_segment_geometries:
-                        raise ValueError(f"Indices provided for '{surface_type}' but no geometries were extracted.")
-
-                    # 2. Geometry Merge
-                    # linemerge can fail if geometries are invalid, raising a TopologicalError or similar
-                    merged_road_geometry = linemerge(road_segment_geometries)
-
-                    # 3. Convert to EWKT List
-                    ewkt_strings_list = []
-
-                    if isinstance(merged_road_geometry, MultiLineString):
-                        for geometry_component in merged_road_geometry.geoms:
-                            ewkt_strings_list.append(self.to_ewkt(geometry_component))
-
-                    elif isinstance(merged_road_geometry, LineString):
-                        ewkt_strings_list.append(self.to_ewkt(merged_road_geometry))
-
-                    else:
-                        # Unexpected behavior: linemerge returned a Point, Polygon, or GeometryCollection
-                        raise TypeError(
-                            f"Unexpected geometry type '{type(merged_road_geometry)}' returned "
-                            f"after merging road segments for surface '{surface_type}'."
-                        )
-
-                    result_map[surface_type] = ewkt_strings_list
-
-                except KeyError as lookup_error:
-                    raise KeyError(
-                        f"Critical Error: One or more road indices in {road_segment_indices} "
-                        f"for surface '{surface_type}' were not found in the global road GeoDataFrame."
-                    ) from lookup_error
-
-                except Exception as unexpected_error:
-                    raise RuntimeError(
-                        f"An unexpected error occurred while processing road geometries "
-                        f"for surface '{surface_type}': {str(unexpected_error)}"
-                    ) from unexpected_error
-
-            return result_map
 
 
 class AttributeExtractor:
@@ -264,7 +203,7 @@ def _serialize_node(node: Any, geo: GeometryProcessor) -> Dict[str, Any]:
         stats = AttributeExtractor.extract(
             node.road,
             suffix_map=ROAD_STAT_SUFFIXES,
-            exclude_patterns=["indices"] # Exclude because we processed them into WKTs above
+            exclude_patterns=["indices", "graph", "point"] # Exclude internal structures
         )
         road_data.update(stats)
 

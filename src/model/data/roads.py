@@ -1,5 +1,6 @@
 import geopandas as gpd
 from pathlib import Path
+from typing import Dict
 
 from utils import config
 from . import drains
@@ -9,7 +10,10 @@ _gdf = gpd.read_file(path)
 
 # Data Validation Functions
 def __vd_index() -> None:
-    _gdf['index'] = _gdf['index'] if 'index' in _gdf.columns else range(len(_gdf))
+    if 'index' not in _gdf.columns:
+        _gdf['index'] = range(len(_gdf))
+
+    _gdf.set_index('index', inplace=True, drop=True, verify_integrity=True)
 
 def __vd_road_types() -> None:
     unknown_types = set(_gdf['TYPE']) - set(config.get_road_types())
@@ -24,6 +28,10 @@ __vd_index()
 __vd_road_types()
 __vd_length_and_area()
 # TODO: Add slope to attribute for erosion
+
+# Export fast lookup maps
+length_map: Dict[int, float] = dict(zip(_gdf.index, _gdf['LENGTH']))
+area_map: Dict[int, float] = dict(zip(_gdf.index, _gdf['AREA']))
 
 # Pre-Processing Functions
 
