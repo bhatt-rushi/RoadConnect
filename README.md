@@ -6,7 +6,7 @@ This is a Graph-Based Sediment and Routing Model developed as part of an undergr
 
 ## 🚧 Project Status
 
-This project is in active development. The core routing model is functional, but many pre-processing steps and feature enhancements are still in experimental phases or planned.
+This project is in active development. The core routing model is functional, but many pre-processing steps and feature enhancements are still in experimental phases or not ready to be made public yet. Please note, this repo is currently outdated and many commits / refactors behind as it is still undergoing rapid iteration.
 
 ### Current Capabilities
 The main program can currently:
@@ -31,8 +31,8 @@ The model currently requires all data to be pre-processed and provided in the co
 **Pre-Processing & Data Integration**
 
   * [ ] **Road Elevation Filter:** Develop and implement a filter to smoothen road elevation profiles to handle noise.
-  * [ ] **Integrate Road Processing:** Integrate experimental notebook code for automated road surface extraction and segmentation into the main program.
-  * [ ] **Integrate DEM Automation:** Integrate experimental notebook code for automated downloading and caching of DEM data.
+  * [ ] **Integrate Road Processing:** Integrate module for automated road surface extraction and segmentation into the main program.
+  * [ ] **Integrate DEM Automation:** Integrate module for automated downloading and caching of DEM data.
   * [ ] **Add Field Data:** Populate the configuration with real road types and erosion rates from field studies.
 
 **Model Feature Enhancements**
